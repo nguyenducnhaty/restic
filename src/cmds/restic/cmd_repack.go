@@ -70,5 +70,9 @@ func (cmd CmdRepack) Execute(args []string) error {
 	}
 	cmd.global.Printf("  %d duplicate blobs\n", dups)
 
-	return repository.Repack(repo, packs, blobs)
+	if err := repository.Repack(repo, packs, blobs); err != nil {
+		return err
+	}
+
+	return repository.RebuildIndex(repo)
 }
