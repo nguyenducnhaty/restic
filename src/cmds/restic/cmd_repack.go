@@ -2,6 +2,7 @@ package main
 
 import (
 	"restic/backend"
+	"restic/debug"
 	"restic/repository"
 )
 
@@ -45,8 +46,10 @@ func (cmd CmdRepack) Execute(args []string) error {
 
 	packs := backend.NewIDSet()
 	blobs := backend.NewIDSet()
+
+	cmd.global.Verbosef("listing packs in repo\n")
 	for packID := range repo.List(backend.Data, done) {
-		packs.Insert(packID)
+		debug.Log("CmdRepack.Execute", "process pack %v", packID.Str())
 
 		list, err := repo.ListPack(packID)
 		if err != nil {
@@ -54,9 +57,16 @@ func (cmd CmdRepack) Execute(args []string) error {
 			continue
 		}
 
+		debug.Log("CmdRepack.Execute", "pack %v contains %d blobs", packID.Str(), len(list))
 		for _, pb := range list {
 			blobs.Insert(pb.ID)
 			duplicateBlobs[pb.ID]++
+
+			// only insert it into the list of packs when there is a blob we
+			// have already seen.
+			if duplicateBlobs[pb.ID] > 1 {
+				packs.Insert(packID)
+			}
 		}
 	}
 
