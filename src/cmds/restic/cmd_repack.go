@@ -5,6 +5,7 @@ import (
 	"restic/repository"
 )
 
+// CmdRepack implements the 'repack' command.
 type CmdRepack struct {
 	global *GlobalOptions
 }
@@ -19,6 +20,7 @@ func init() {
 	}
 }
 
+// Execute runs the 'repack' command.
 func (cmd CmdRepack) Execute(args []string) error {
 	repo, err := cmd.global.OpenRepository()
 	if err != nil {
