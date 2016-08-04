@@ -5,7 +5,9 @@ package main
 import (
 	"restic/backend"
 	"restic/debug"
+	"restic/pack"
 	"restic/repository"
+	"restic/worker"
 )
 
 // CmdRepack implements the 'repack' command.
@@ -41,27 +43,30 @@ func (cmd CmdRepack) Execute(args []string) error {
 		return err
 	}
 
-	done := make(chan struct{})
-	defer close(done)
-
 	duplicateBlobs := make(map[backend.ID]uint)
 
 	packs := backend.NewIDSet()
-	blobs := backend.NewIDSet()
+	blobs := pack.NewBlobSet()
 
 	cmd.global.Verbosef("listing packs in repo\n")
-	for packID := range repo.List(backend.Data, done) {
-		debug.Log("CmdRepack.Execute", "process pack %v", packID.Str())
 
-		list, err := repo.ListPack(packID)
-		if err != nil {
-			cmd.global.Warnf("unable to list pack %v: %v\n", packID.Str(), err)
+	done := make(chan struct{})
+	defer close(done)
+	ch := make(chan worker.Job)
+	go repository.ListAllPacks(repo, ch, done)
+
+	for job := range ch {
+		packID := job.Data.(backend.ID)
+		if job.Error != nil {
+			cmd.global.Warnf("unable to list pack %v: %v\n", packID.Str(), job.Error)
 			continue
 		}
 
-		debug.Log("CmdRepack.Execute", "pack %v contains %d blobs", packID.Str(), len(list))
-		for _, pb := range list {
-			blobs.Insert(pb.ID)
+		j := job.Result.(repository.ListAllPacksResult)
+
+		debug.Log("CmdRepack.Execute", "pack %v contains %d blobs", j.PackID.Str(), len(j.Entries))
+		for _, pb := range j.Entries {
+			blobs.Insert(pack.Handle{ID: pb.ID, Type: pb.Type})
 			duplicateBlobs[pb.ID]++
 
 			// only insert it into the list of packs when there is a blob we

@@ -1,12 +1,14 @@
 package main
 
 import (
-	"fmt"
 	"restic"
 	"restic/backend"
 	"restic/debug"
 	"restic/pack"
 	"restic/repository"
+	"restic/worker"
+
+	"github.com/cheggaaa/pb"
 )
 
 // CmdPrune implements the 'prune' command.
@@ -63,41 +65,39 @@ func (cmd CmdPrune) Execute(args []string) error {
 	cmd.global.Verbosef("listing %v files\n", stats.packs)
 
 	blobCount := make(map[backend.ID]int)
+	duplicateBlobs := 0
+	duplicateBytes := 0
+	rewritePacks := backend.NewIDSet()
 
-	for packID := range packs {
-		debug.Log("CmdPrune.Execute", "process pack %v", packID.Str())
-		cmd.global.Verbosef("process pack %v\n", packID.Str())
+	ch := make(chan worker.Job)
+	go repository.ListAllPacks(repo, ch, done)
 
-		list, err := repo.ListPack(packID)
-		if err != nil {
-			cmd.global.Warnf("unable to list pack %v: %v\n", packID.Str(), err)
+	for job := range ch {
+		packID := job.Data.(backend.ID)
+		if job.Error != nil {
+			cmd.global.Warnf("unable to list pack %v: %v\n", packID.Str(), job.Error)
 			continue
 		}
 
-		debug.Log("CmdPrune.Execute", "pack %v contains %d blobs", packID.Str(), len(list))
-		for _, pb := range list {
-			cmd.global.Verbosef("  blob %v (%v)\n", pb.ID.Str(), pb.Type)
+		j := job.Result.(repository.ListAllPacksResult)
+
+		debug.Log("CmdPrune.Execute", "pack %v contains %d blobs", packID.Str(), len(j.Entries))
+		for _, pb := range j.Entries {
 			packs[packID].Insert(pack.Handle{ID: pb.ID, Type: pb.Type})
 			stats.blobs++
 			blobCount[pb.ID]++
-		}
-	}
 
-	for id, num := range blobCount {
-		if num <= 1 {
-			continue
-		}
+			if blobCount[pb.ID] > 1 {
+				duplicateBlobs++
+				duplicateBytes += int(pb.Length)
 
-		cmd.global.Verbosef("blob %v stored %d times:\n", id.Str(), num)
-		for packID, packBlobs := range packs {
-			for h := range packBlobs {
-				if h.ID.Equal(id) {
-					fmt.Printf("   pack %v, %v\n", packID.Str(), h)
-				}
+				rewritePacks.Insert(packID)
 			}
 		}
 	}
 
+	cmd.global.Verbosef("processed %d blobs: %d duplicate blobs, %d duplicate bytes\n",
+		stats.blobs, duplicateBlobs, duplicateBytes)
 	cmd.global.Verbosef("load all snapshots\n")
 
 	snapshots, err := restic.LoadAllSnapshots(repo)
@@ -110,33 +110,47 @@ func (cmd CmdPrune) Execute(args []string) error {
 	cmd.global.Verbosef("find data that is still in use for %d snapshots\n", stats.snapshots)
 
 	usedBlobs := pack.NewBlobSet()
+	seenBlobs := pack.NewBlobSet()
+	pb := pb.New(len(snapshots))
+	pb.Width = 70
+	pb.Start()
 	for _, sn := range snapshots {
 		debug.Log("CmdPrune.Execute", "process snapshot %v", sn.ID().Str())
 
-		err = restic.FindUsedBlobs(repo, *sn.Tree, usedBlobs)
+		err = restic.FindUsedBlobs(repo, *sn.Tree, usedBlobs, seenBlobs)
 		if err != nil {
 			return err
 		}
 
 		debug.Log("CmdPrune.Execute", "found %v blobs for snapshot %v", sn.ID().Str())
+		pb.Increment()
 	}
+	pb.Finish()
 
 	cmd.global.Verbosef("found %d of %d data blobs still in use\n", len(usedBlobs), stats.blobs)
 
-	rewritePacks := backend.NewIDSet()
 	for packID, blobSet := range packs {
 		for h := range blobSet {
 			if !usedBlobs.Has(h) {
-				cmd.global.Verbosef("blob %v is unused\n", h)
 				rewritePacks.Insert(packID)
 			}
 		}
 	}
+
+	cmd.global.Verbosef("will rewrite %d packs\n", len(rewritePacks))
 
 	err = repository.Repack(repo, rewritePacks, usedBlobs)
 	if err != nil {
 		return err
 	}
 
-	return repository.RebuildIndex(repo)
+	cmd.global.Verbosef("creating new index\n")
+
+	err = repository.RebuildIndex(repo)
+	if err != nil {
+		return err
+	}
+
+	cmd.global.Verbosef("done\n")
+	return nil
 }
