@@ -72,6 +72,9 @@ func (cmd CmdPrune) Execute(args []string) error {
 	ch := make(chan worker.Job)
 	go repository.ListAllPacks(repo, ch, done)
 
+	bar := pb.New(len(packs))
+	bar.Width = 70
+	bar.Start()
 	for job := range ch {
 		packID := job.Data.(backend.ID)
 		if job.Error != nil {
@@ -92,7 +95,9 @@ func (cmd CmdPrune) Execute(args []string) error {
 				duplicateBytes += int(pb.Length)
 			}
 		}
+		bar.Increment()
 	}
+	bar.Finish()
 
 	cmd.global.Verbosef("processed %d blobs: %d duplicate blobs, %d duplicate bytes\n",
 		stats.blobs, duplicateBlobs, duplicateBytes)
@@ -109,9 +114,9 @@ func (cmd CmdPrune) Execute(args []string) error {
 
 	usedBlobs := pack.NewBlobSet()
 	seenBlobs := pack.NewBlobSet()
-	pb := pb.New(len(snapshots))
-	pb.Width = 70
-	pb.Start()
+	bar = pb.New(len(snapshots))
+	bar.Width = 70
+	bar.Start()
 	for _, sn := range snapshots {
 		debug.Log("CmdPrune.Execute", "process snapshot %v", sn.ID().Str())
 
@@ -121,9 +126,9 @@ func (cmd CmdPrune) Execute(args []string) error {
 		}
 
 		debug.Log("CmdPrune.Execute", "found %v blobs for snapshot %v", sn.ID().Str())
-		pb.Increment()
+		bar.Increment()
 	}
-	pb.Finish()
+	bar.Finish()
 
 	cmd.global.Verbosef("found %d of %d data blobs still in use\n", len(usedBlobs), stats.blobs)
 
