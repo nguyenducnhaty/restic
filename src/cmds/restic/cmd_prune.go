@@ -90,8 +90,6 @@ func (cmd CmdPrune) Execute(args []string) error {
 			if blobCount[pb.ID] > 1 {
 				duplicateBlobs++
 				duplicateBytes += int(pb.Length)
-
-				rewritePacks.Insert(packID)
 			}
 		}
 	}
@@ -132,6 +130,10 @@ func (cmd CmdPrune) Execute(args []string) error {
 	for packID, blobSet := range packs {
 		for h := range blobSet {
 			if !usedBlobs.Has(h) {
+				rewritePacks.Insert(packID)
+			}
+
+			if blobCount[h.ID] > 1 {
 				rewritePacks.Insert(packID)
 			}
 		}
