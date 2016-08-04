@@ -8,6 +8,12 @@
 			"branch": "HEAD"
 		},
 		{
+			"importpath": "github.com/cheggaaa/pb",
+			"repository": "https://github.com/cheggaaa/pb",
+			"revision": "9453b2db37f4d8bc63751daca63bbe7049eb5e74",
+			"branch": "master"
+		},
+		{
 			"importpath": "github.com/jessevdk/go-flags",
 			"repository": "https://github.com/jessevdk/go-flags",
 			"revision": "1b89bf73cd2c3a911d7b2a279ab085c4a18cf539",
